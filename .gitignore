@@ -1,0 +1,12 @@
+.env
+.DS_Store
+/dbt/dbt_packages
+/dbt/.user.yml
+/dbt/target
+/dbt/logs
+/dbt/package-lock.yml
+/reporting/service_account.json
+plan.md
+synthetic_data/*.json
+database/*.duckdb
+*.log
