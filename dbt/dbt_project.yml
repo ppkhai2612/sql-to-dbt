@@ -1,0 +1,39 @@
+name: 'sql_to_dbt_guide'
+
+config-version: 2
+version: '1.0.0'
+
+profile: 'sql_to_dbt_guide'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+  - "logs"
+
+require-dbt-version: [">=1.0.0", "<2.0.0"]
+
+flags:
+  require_generic_test_arguments_property: true
+
+models:
+  sql_to_dbt_guide:
+    staging:
+      +materialized: table
+      +schema: staging
+      # +contract:  # Comment these 2 lines to disable contract validation
+      #   enforced: true
+    intermediate:
+      +materialized: view
+      +schema: intermediate
+    marts:
+      +materialized: view
+      +schema: marts
+    ephemeral:
+      +materialized: ephemeral
