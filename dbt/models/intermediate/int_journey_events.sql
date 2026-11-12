@@ -56,7 +56,7 @@ select
     end as event_category,
 
     case
-        when journey_events.channel = campaign.channel then true
+        when journey_events.channel = campaigns.channel then true
         else false
     end as channel_alignment,
 
