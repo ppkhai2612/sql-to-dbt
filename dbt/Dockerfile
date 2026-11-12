@@ -16,8 +16,11 @@ ENV PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app/dbt
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install dependencies
-RUN pip install --upgrade pip
-RUN pip install dbt-duckdb dbt-colibri
+RUN pip install --no-cache-dir --upgrade pip
+RUN pip install --no-cache-dir dbt-duckdb dbt-colibri

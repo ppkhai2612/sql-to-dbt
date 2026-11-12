@@ -17,9 +17,10 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ./database:/database
-      - ./dbt:/dbt
+      - ./dbt:/app/dbt
     environment:
       - DUCKDB_PATH=/database/sql_to_dbt_guide.duckdb
+      - INPUT_FILES_PATH=${INPUT_FILES_PATH}
     container_name: dbt_runner
     depends_on:
       database:
@@ -27,16 +28,15 @@ services:
     command: sh -c "dbt deps && dbt run"
 
   dbt-docs:
-    build:
-      context: ./dbt
-      dockerfile: Dockerfile
+    image: sql-to-dbt-dbt
     ports:
       - "9000:9000"
     volumes:
       - ./database:/database
-      - ./dbt:/dbt
+      - ./dbt:/app/dbt
     environment:
       - DUCKDB_PATH=/database/sql_to_dbt_guide.duckdb
+      - INPUT_FILES_PATH=${INPUT_FILES_PATH}
     container_name: dbt_docs_server
     depends_on:
       dbt:
@@ -44,16 +44,15 @@ services:
     command: sh -c "dbt docs generate && dbt docs serve --host 0.0.0.0 --port 9000"
 
   dbt-colibri:
-    build:
-      context: ./dbt
-      dockerfile: Dockerfile
+    image: sql-to-dbt-dbt
     ports:
       - "8080:8080"
     volumes:
       - ./database:/database
-      - ./dbt:/dbt
+      - ./dbt:/app/dbt
     environment:
       - DUCKDB_PATH=/database/sql_to_dbt_guide.duckdb
+      - INPUT_FILES_PATH=${INPUT_FILES_PATH}
     container_name: dbt_colibri_server
     depends_on:
       dbt:
