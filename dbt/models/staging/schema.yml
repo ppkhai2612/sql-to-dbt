@@ -125,7 +125,7 @@ models:
         - name: channel
           data_type: string
           data_tests:
-            - accpepted_values:
+            - accepted_values:
                 arguments:
                   values: ["social", "search", "display", "email", "referral"]
           description: Marketing channel
@@ -231,7 +231,7 @@ models:
           constraints:
             - type: not_null
           data_tests:
-            - accpepted_values:
+            - accepted_values:
                 arguments:
                   values: ["purchase", "lead", "signup", "appointment", "download"]
           description: Type of conversion event
@@ -309,7 +309,7 @@ models:
           constraints:
             - type: not_null
           data_tests:
-            - accpepted_values:
+            - accepted_values:
                 arguments:
                   values: ["page_view", "click", "purchase", "conversion", "lead", "signup", "call"]
           description: Type of journey event

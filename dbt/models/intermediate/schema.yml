@@ -10,7 +10,7 @@ models:
       - name: conversion_id
         data_tests:
           - unique
-          - not null
+          - not_null
         description: Unique identifier for conversion event
       - name: visitor_id
         data_tests:
