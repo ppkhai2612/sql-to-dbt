@@ -492,3 +492,138 @@ Same output. Six repeated `first_value(...)` calls reduced to a single macro inv
 The project has five macros across two files. Four utility macros live in `classify_performance_tier.sql`, and the attribution macro stands alone.
 
 ## SQL to dbt: Slowly Changing Dimensions
+
+In the project, there are two clear use cases that actually need historical tracking.
+- **Campaign performance evolution**: ROAS, conversion rates, and budget utilization change daily. Marketing managers need performance trends over time, not just today’s snapshot.
+- **Visitor segment transitions**: Customers evolve from prospects to VIP buyers. Understanding these lifecycle transitions helps predict behavior and optimize targeting.
+
+dbt snapshots detect changes in two ways. Your choice depends on what triggers historical tracking.
+
+### Timestamp: When Records Change
+
+`snap_campaign_performance.sql` uses the timestamp strategy. Every time the source data updates, dbt captures a new historical record:
+
+```sql
+{% snapshot snap_campaign_performance %}
+{{
+    config(
+        target_schema='snapshots',
+        strategy='timestamp',
+        unique_key='campaign_id',
+        updated_at='date_transformed',
+        invalidate_hard_deletes=true
+    )
+}}
+
+select
+    campaign_id,
+    campaign_name,
+    ...
+    case 
+        when roas >= 4.0 then 'excellent'
+        when roas >= 2.0 then 'good'
+        when roas >= 1.0 then 'break_even'
+        else 'poor'
+    end as roas_tier,
+    date_transformed,
+from {{ ref('campaign_performance') }}
+
+{% endsnapshot %}
+```
+
+Timestamp strategy works when you have a reliable `updated_at` column and want to capture every change. Campaign metrics move daily. This is the right fit.
+
+### Check: When Specific Columns Change
+
+`snap_visitor_segments.sql` uses the check strategy. dbt only creates a new record when specific columns actually change:
+
+```sql
+{% snapshot snap_visitor_segments %}
+{{
+  config(
+    target_schema='snapshots',
+    strategy='check',
+    unique_key='visitor_id',
+    check_cols=[
+        'visitor_frequency_segment',
+        'visitor_value_segment', 
+        'visitor_engagement_segment',
+        'total_sessions',
+        'total_conversions',
+        'total_revenue'
+    ],
+    invalidate_hard_deletes=true
+  )
+}}
+
+select
+    visitor_id,
+    ...
+    case 
+        when total_conversions = 0 then 'prospect'
+        when total_conversions = 1 and total_revenue < 100 then 'new_customer'
+        when total_conversions > 1 and total_revenue < 500 then 'repeat_customer'
+        when total_conversions > 1 and total_revenue >= 500 then 'vip_customer'
+        else 'unknown'
+    end as lifecycle_stage,
+    date_transformed,
+from  {{ ref('visitor_journey') }}
+
+{% endsnapshot %}
+```
+
+Check strategy is the right call when you care about specific attribute transitions, not every data update.
+
+If a visitor’s page view count increases but their segment stays the same, no new snapshot record.
+
+The strategy-to-use-case mapping is the core lesson: **timestamp** for metrics that change frequently and where every change matters, **check** for categorical shifts where you’re tracking transitions.
+
+### Querying Historical Data
+
+Snapshots create three special columns: `dbt_valid_from` (when this version became active), `dbt_valid_to` (when it was superseded, NULL for current), and `dbt_updated_at` (when dbt processed it).
+- **Current state** - get the latest version of each record:
+
+    ```sql
+    select *
+    from snapshots.snap_campaign_performance
+    where dbt_valid_to is null
+    ```
+
+- **Point-in-time** - what did the data look like on a specific date:
+
+    ```sql
+    select *
+    from snapshots.snap_campaign_performance
+    where ‘2024-01-15’ >= dbt_valid_from
+    and (’2024-01-15’ < dbt_valid_to or dbt_valid_to is null)
+    ```
+
+- **Trend analysis** - track changes over time with window functions:
+
+    ```sql
+    select
+        campaign_id,
+        campaign_name,
+        dbt_valid_from,
+        roas,
+        roas_tier,
+        lag(roas) over (partition by campaign_id order by dbt_valid_from) as previous_roas
+    from snapshots.snap_campaign_performance
+    order by campaign_id, dbt_valid_from
+    ```
+
+These three patterns cover most analytical needs. Current state for dashboards, point-in-time for compliance, trend analysis for optimization decisions.
+
+### The Costs and When to Skip It
+
+SCD2 is not free. Before snapshotting everything, understand the trade-offs:
+- **Storage**: A campaign that changes daily creates 365 records per year. Multiply by thousands of campaigns.
+- **Query complexity**: Historical queries require date filters and window functions. Not every analyst is comfortable with these.
+- **Processing time**: Every `dbt snapshot` run compares current data against all historical records.
+- **Maintenance**: Snapshot schemas need monitoring. The repo includes a `snapshots/schema.yml` with column descriptions and `not_null` tests on key identifiers. Treat snapshot documentation the same as any other model.
+
+**You probably don’t need SCD2 if** your analysis only looks at current state, historical changes happen infrequently, or storage costs outweigh analytical value.
+
+**You definitely need SCD2** if compliance requires audit trails, business decisions depend on trend analysis, or customer lifecycle analysis drives strategy.
+
+Mitigation helps: use `invalidate_hard_deletes=true` to handle deleted source records, consider archiving old snapshots after defined retention periods, and create mart models that pre-calculate common historical analyses.
