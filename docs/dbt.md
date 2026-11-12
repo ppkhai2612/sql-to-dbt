@@ -319,6 +319,146 @@ Campaign managers care about ROAS, conversion rates, and spend efficiency, this 
 
 ## SQL to dbt: Testing & Quality
 
+### Data Integrity vs Data Quality
+
+Data integrity ensures that data is accurate, complete, consistent, and secure throughout its lifecycle. Data quality measures how well data meets the criteria for its intended purpose.
+
+You need both, but they solve different problems.
+
+Nice questions to ask yourself:
+- Can you run your analysis without this data? If no, **integrity**
+- Does wrong data lead to bad decisions? If yes, **quality**
+
+The best approach:
+1. Start with integrity using constraints to prevent system failures.
+2. Add quality tests for business-critical calculations and relationships.
+
+Work closely with whoever produces the raw data: backend teams, backoffice users, and others. They’ll help you understand what must never fail and what needs testing to avoid erratic decisions.
+
+---
+
+> The Multi-Layer Defense Strategy
+
+---
+
+### Data Contracts
+
+Data contracts validate during model compilation, failing fast if schema violations occur. Here's your staging model definition:
+
+```yaml
+models:
+  - name: stg_campaigns
+    columns:
+      - name: campaign_id
+        data_type: string
+        constraints:
+          - type: not_null
+          - type: primary_key
+          - type: unique
+      - name: budget
+        data_type: double
+        constraints:
+          - type: check
+            expression: "budget > 0"
+      ...
+```
+
+Contracts stop bad data from entering your transformation pipeline. If `campaign_id` isn't unique, a column's data type doesn't match, or budget is negative, the model won't compile. This catches schema problems before they propagate downstream.
+
+More info on [dbt docs](https://docs.getdbt.com/reference/resource-configs/contract?version=2)
+
+### Generic Tests
+
+dbt ships with four generic data tests already defined: `unique`, `not_null`, `accepted_values` and `relationships`.
+
+But you can customise something for your use case. In this case, we have multiple columns that can't be negative, here's a budget numeric validation test:
+
+```sql
+{% test positive_numeric(model, column_name) %}
+
+select *
+from {{ model }}
+where {{ column_name }} is not null
+    and {{ column_name }} <= 0
+
+{% endtest %}
+```
+
+Apply these tests via YAML configuration on the column level:
+
+```yaml
+columns:
+  - name: conversion_type
+    data_tests:
+      - accpepted_values:
+          arguments:
+            values: ["purchase", "lead", "signup", "appointment", "download"]
+  - name: conversion_value
+    data_tests:
+      - positive_numeric
+```
+
+Generic tests are reusable across models and catch universal data quality issues.
+
+More info on [dbt docs](https://docs.getdbt.com/docs/build/data-tests?version=2#generic-data-tests)
+
+### Singular Tests
+
+Singular tests validate specific business rules that generic tests can't handle. Here's a campaign date logic test:
+
+```sql
+-- Test that campaign start_date is always <= end_date
+select
+    campaign_id,
+    capaign_name,
+    start_date,
+    end_date
+from {{ ref('stg_campaigns') }}
+where start_date > end_date
+```
+
+These tests catch logical inconsistencies specific to marketing analytics that only domain experts would know to check.
+
+More info on [dbt docs](https://docs.getdbt.com/docs/build/data-tests?version=2#singular-data-tests).
+
+### dbt-expectations
+
+You can use it for similar use cases as mentioned before, but its really good at statistical validation or anomaly detection:
+
+```yaml
+columns:
+  - name: budget
+    data_tests:
+      - dbt_expectations.expect_column_values_to_be_between:
+          arguments:
+            min_value: 1000
+            max_value: 10000000
+```
+
+This provides the statistical rigor of Great Expectations within your dbt workflow, catching anomalies that simple range checks might miss.
+
+More info on [dbt_expectations](https://hub.getdbt.com/metaplane/dbt_expectations/latest/)
+
+### Execution Flow
+
+Run `dbt build` or `dbt run` (with contracts enforced) to make all the tests happen:
+1. **Contract Validation**: Ensures schema compliance during model compilation
+2. **Model Creation**: Builds staging views with enforced contracts
+3. **Test Execution**: Runs all configured tests (generic, singular, and expectations)
+4. **Failure Handling**: Stops the pipeline or warns on critical test failures
+
+More info on [dbt test docs](../dbt/tests/README.md#test-execution-flow)
+
+### What Does A Test Failure Means
+
+Test failures warn you when something's wrong, and how serious they are depends on the test type. Depending on the context, tests require different responses and involve different stakeholders.
+
+Here's how to handle them:
+- **Contract**: Fix schema issues at the source or adjust model expectations
+- **Generic**: Investigate data quality issues in upstream systems
+- **Singular**: Business logic violations require domain expert review
+- **Expectations**: Statistical anomalies may indicate data pipeline issues
+
 ## SQL to dbt: Macros & Code Reusability
 
 ## SQL to dbt: Slowly Changing Dimensions
