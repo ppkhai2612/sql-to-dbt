@@ -194,6 +194,129 @@ dbt build
 
 ## SQL to dbt: Medallion Architecture
 
+Medallion architecture might look like a nice way of organizing folders, but it's more than that.
+
+You create logical flows of data transformations that makes sense to your team and scales with your business.
+
+The further you go up, the cleaner and complexity-free the project should be.
+
+You can break down business logic into useful transformed assets from source to final analytics ready assets.
+
+### Bronze Layer: The Foundation
+
+Your `sources.yml` file defines the contract between dbt and raw data:
+
+```yaml
+sources:
+  - name: synthetic_data
+    description: "Synthetic marketing and analytics data"
+    schema: main
+    tables:
+      - name: campaigns
+      - name: ads
+      - name: sessions
+      - name: conversions
+      - name: journey_events
+```
+
+This is your Bronze layer raw data with minimal transformation.
+
+The `source()` function creates dependency management that everything else builds upon. No business logic here, just clean access to your raw tables.
+
+You can go fancy here and test things you want to validate from the backend tables even before transforming anything.
+
+### Silver Layer: Business Logic
+
+From a dbt perspective, what comes after this Bronze layer are known as staging models.
+
+Clean raw data without adding business logic. Look at `stg_campaigns.sql`:
+
+```sql
+select
+    campaign_id,
+    name as campaign_name,  -- Simple renaming
+    channel,
+    ...
+from {{ source('synthetic_data', 'campaigns') }}
+```
+
+What’s NOT here: no aggregations, no complex `CASE` statements, no joins. Staging models standardize column names, handle data types, and ensure consistency.
+
+Each staging model represents should represent one source table for consistency, cleaned and ready for business logic.
+
+This separation makes debugging infinitely easier when things break.
+
+Then we start going fancy and apply some logic into models with dbt intermediate layer.
+
+Intermediate models solve specific business problems.Each model has a clear purpose and can be tested independently.
+
+You can see that joins are more common on this stage and logics are introduced such as `ctr_performance` example.
+
+Intermediate models combine staging models with business rules. Look at `int_campaign_ads.sql`:
+
+```sql
+select
+    -- columns here...
+    case
+        when ads.ctr > 0.02 then 'high'
+        when ads.ctr > 0.01 then 'medium'
+        else 'low'
+    end as ctr_performance,
+    current_timestamp as date_transformed
+from {{ ref('stg_campaigns') }} as campaigns
+left join {{ ref('stg_ads') }} as ads 
+    on campaigns.campaign_id = ads.campaign_id
+```
+
+### Gold Layer: Analytics Ready Assets
+
+Marts are your final product—tables that business users actually query. Look at `campaign_performance.sql`:
+
+```sql
+select
+    -- columns here...
+
+    -- Aggregated metrics
+    count(distinct campaign_ads.ad_id) as total_ads,
+    sum(campaign_ads.impressions) as total_impressions,
+    sum(campaign_ads.clicks) as total_clicks,
+    avg(campaign_ads.ctr) as avg_ctr,
+    sum(campaign_ads.ad_spend) as total_ad_spend,
+    avg(campaign_ads.avg_cpc) as avg_cpc,
+
+    case
+        when sum(campaign_ads.ad_spend) > 0 then sum(conversions.revenue) / sum(campaign_ads.ad_spend)
+        else null
+    end as roas,
+
+    current_timestamp as date_transformed
+from {{ ref('int_campaign_ads') }} as campaign_ads
+left join {{ ref('int_visitor_sessions') }} as visitor_sessions 
+    on campaign_ads.campaign_id = visitor_sessions.campaign_id
+left join {{ ref('int_conversions') }} as conversions 
+    on campaign_ads.campaign_id = conversions.campaign_id
+group by 
+    campaign_ads.campaign_id,
+    campaign_ads.campaign_name,
+    ...
+```
+
+Campaign managers care about ROAS, conversion rates, and spend efficiency, this is where you get those decision drivers exposed to be used for BI workflows.
+
+### Why This Structure Actually Works
+
+- **Separation of Concerns**: Each layer has a clear purpose. Staging cleans, intermediate adds logic, marts serve business needs.
+- **Testability**: You can test data quality at each layer. Also you can decide if you enforced the tests as preventive contracts or as informative results.
+- **Maintainability**: it's easier to trace where to add or edit models if you have a well structured project.
+- **Performance**: Configure materialization by purpose. Decide if you need TABLE, VIEW or incremental approaches depending on the query use cases.
+
+### Common Medallion Mistakes
+
+- Not every transformation needs an intermediate model. Sometimes staging -> marts is perfectly fine. - Keep it flexible and don't overely if your gut and context asks for something else!
+- Keep staging layer simple. Complex `CASE` statements belong in intermediate models.
+- Regarding marts, if business users don't query it directly, it probably belongs in intermediate.
+- Poor naming conventions like `tmp_stuff_v2` don't help anyone.
+
 ## SQL to dbt: Testing & Quality
 
 ## SQL to dbt: Macros & Code Reusability
